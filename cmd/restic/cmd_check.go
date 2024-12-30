@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
 	"os"
 	"strconv"
@@ -221,7 +222,12 @@ func runCheck(ctx context.Context, opts CheckOptions, gopts GlobalOptions, args 
 		return errors.Fatal("the check command expects no arguments, only options - please see `restic help check` for usage and flags")
 	}
 
-	printer := ui.NewMessage(term, gopts.verbosity)
+	var printer Printer
+	if !gopts.JSON {
+		printer = ui.NewMessage(term, gopts.verbosity)
+	} else {
+		printer = newJsonErrorPrinter(term)
+	}
 
 	cleanup := prepareCheckCache(opts, &gopts, printer)
 	defer cleanup()
@@ -322,7 +328,7 @@ func runCheck(ctx context.Context, opts CheckOptions, gopts GlobalOptions, args 
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		bar := newTerminalProgressMax(!gopts.Quiet, 0, "snapshots", term)
+		bar := newTerminalProgressMax(!gopts.Quiet && !gopts.JSON, 0, "snapshots", term)
 		defer bar.Done()
 		chkr.Structure(ctx, bar, errChan)
 	}()
@@ -361,7 +367,7 @@ func runCheck(ctx context.Context, opts CheckOptions, gopts GlobalOptions, args 
 	doReadData := func(packs map[restic.ID]int64) {
 		packCount := uint64(len(packs))
 
-		p := newTerminalProgressMax(!gopts.Quiet, packCount, "packs", term)
+		p := newTerminalProgressMax(!gopts.Quiet && !gopts.JSON, packCount, "packs", term)
 		errChan := make(chan error)
 
 		go chkr.ReadPacks(ctx, packs, p, errChan)
@@ -438,6 +444,13 @@ func runCheck(ctx context.Context, opts CheckOptions, gopts GlobalOptions, args 
 		return errors.Fatal("repository contains errors")
 	}
 	printer.P("no errors were found\n")
+	if gopts.JSON {
+		status := checkSuccess{
+			MessageType: "checked",
+			Message:     "no errors were found",
+		}
+		term.Print(ui.ToJSONString(status))
+	}
 
 	return nil
 }
@@ -485,3 +498,34 @@ func selectRandomPacksByFileSize(allPacks map[restic.ID]int64, subsetSize int64,
 	packs := selectRandomPacksByPercentage(allPacks, subsetPercentage)
 	return packs
 }
+
+type checkSuccess struct {
+	MessageType string `json:"message_type"` // "checked"
+	Message     string `json:"message"`
+}
+
+type checkError struct {
+	MessageType string `json:"message_type"` // "error"
+	Message     string `json:"message"`
+}
+
+type jsonErrorPrinter struct {
+	term ui.Terminal
+}
+
+func newJsonErrorPrinter(term ui.Terminal) *jsonErrorPrinter {
+	return &jsonErrorPrinter{
+		term: term,
+	}
+}
+
+func (p *jsonErrorPrinter) E(msg string, args ...interface{}) {
+	status := checkError{
+		MessageType: "error",
+		Message:     fmt.Sprintf(msg, args...),
+	}
+	p.term.Print(ui.ToJSONString(status))
+}
+func (*jsonErrorPrinter) P(_ string, _ ...interface{})  {}
+func (*jsonErrorPrinter) V(_ string, _ ...interface{})  {}
+func (*jsonErrorPrinter) VV(_ string, _ ...interface{}) {}

@@ -17,7 +17,6 @@ import (
 	"github.com/restic/restic/internal/repository"
 	"github.com/restic/restic/internal/restic"
 	"github.com/restic/restic/internal/ui"
-	"github.com/restic/restic/internal/ui/progress"
 	"github.com/restic/restic/internal/ui/termstatus"
 )
 
@@ -157,13 +156,20 @@ func parsePercentage(s string) (float64, error) {
 	return p, nil
 }
 
+type Printer interface {
+	E(msg string, args ...interface{})
+	P(msg string, args ...interface{})
+	V(msg string, args ...interface{})
+	VV(msg string, args ...interface{})
+}
+
 // prepareCheckCache configures a special cache directory for check.
 //
 //   - if --with-cache is specified, the default cache is used
 //   - if the user explicitly requested --no-cache, we don't use any cache
 //   - if the user provides --cache-dir, we use a cache in a temporary sub-directory of the specified directory and the sub-directory is deleted after the check
 //   - by default, we use a cache in a temporary directory that is deleted after the check
-func prepareCheckCache(opts CheckOptions, gopts *GlobalOptions, printer progress.Printer) (cleanup func()) {
+func prepareCheckCache(opts CheckOptions, gopts *GlobalOptions, printer Printer) (cleanup func()) {
 	cleanup = func() {}
 	if opts.WithCache {
 		// use the default cache, no setup needed
@@ -215,7 +221,7 @@ func runCheck(ctx context.Context, opts CheckOptions, gopts GlobalOptions, args 
 		return errors.Fatal("the check command expects no arguments, only options - please see `restic help check` for usage and flags")
 	}
 
-	printer := newTerminalProgressPrinter(gopts.verbosity, term)
+	printer := ui.NewMessage(term, gopts.verbosity)
 
 	cleanup := prepareCheckCache(opts, &gopts, printer)
 	defer cleanup()
